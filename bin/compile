@@ -8,3 +8,5 @@ if pack = LanguagePack.detect(ARGV[0], ARGV[1])
     pack.compile
   end
 end
+
+`#{File.expand_path("../", __FILE__)}compile-clj #{ARGV[0]} #{ARGV[1]}`

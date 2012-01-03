@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# bin/compile <build-dir> <cache-dir>
+
+# fail fast
+set -e
+
+# parse args
+BUILD_DIR=$1
+CACHE_DIR=$2
+
+# install leiningen jar
+LEIN_VERSION="1.6.2"
+LEIN_JAR_URL="https://heroku-buildpack-clojure.s3.amazonaws.com/leiningen-$LEIN_VERSION-standalone.jar"
+LEIN_JAR_PATH="$CACHE_DIR/leiningen-$LEIN_VERSION-standalone.jar"
+
+if [ ! -r "$LEIN_JAR_PATH" ]; then
+  echo "-----> Installing Leiningen"
+  echo "       Downloading: leiningen-$LEIN_VERSION-standalone.jar"
+  mkdir -p $(dirname $LEIN_JAR_PATH)
+  curl --silent --show-error --max-time 120 -L -o $LEIN_JAR_PATH $LEIN_JAR_URL
+else
+  echo "-----> Using cached Leiningen $LEIN_VERSION"
+fi
+
+mkdir -p "$BUILD_DIR/.lein"
+cp "$LEIN_JAR_PATH" "$BUILD_DIR/.lein/leiningen-$LEIN_VERSION-standalone.jar"
+
+# install rlwrap binary
+RLWRAP_BIN_URL="https://s3.amazonaws.com/clojure-lp/rlwrap-0.3.7"
+RLWRAP_BIN_PATH=$BUILD_DIR"/.lein/bin/rlwrap"
+echo "       Downloading: rlwrap-0.3.7"
+mkdir -p $(dirname $RLWRAP_BIN_PATH)
+curl --silent --show-error --max-time 60 -L -o $RLWRAP_BIN_PATH $RLWRAP_BIN_URL
+chmod +x $RLWRAP_BIN_PATH
+
+# install lein script
+LEIN_BIN_SOURCE="$(dirname $0)/../opt/lein"
+LEIN_BIN_PATH=$BUILD_DIR"/.lein/bin/lein"
+echo "       Writing: lein script"
+mkdir -p $(dirname $LEIN_BIN_PATH)
+cp $LEIN_BIN_SOURCE $LEIN_BIN_PATH
+chmod +x $LEIN_BIN_PATH
+sed -i s/##LEIN_VERSION##/$LEIN_VERSION/ $LEIN_BIN_PATH
+
+# unpack existing cache
+CACHE_STORE_DIR=$CACHE_DIR"/.m2"
+CACHE_TARGET_DIR=$BUILD_DIR"/.m2"
+rm -rf $CACHE_TARGET_DIR
+if [ -d $CACHE_STORE_DIR ]; then
+  cp -r $CACHE_STORE_DIR $CACHE_TARGET_DIR
+else
+  mkdir -p $CACHE_TARGET_DIR
+fi
+
+LEIN_BUILD_TASK=${LEIN_BUILD_TASK:-"deps"}
+
+# fetch deps with lein
+echo "-----> Installing dependencies and compiling with Leiningen"
+
+# LEIN_NO_DEV should be optional.
+if [ "$LEIN_DEV" = "" ]; then
+  export LEIN_NO_DEV=y
+  echo "       Running: LEIN_NO_DEV=y lein $LEIN_BUILD_TASK"
+else
+  echo "       Running: lein $LEIN_BUILD_TASK"
+fi
+
+cd $BUILD_DIR
+PATH=.lein/bin:/usr/local/bin:/usr/bin:/bin \
+  JAVA_OPTS="-Xmx500m -Duser.home=$BUILD_DIR" \
+  lein $LEIN_BUILD_TASK 2>&1 | sed -u 's/^/       /'
+if [ "${PIPESTATUS[*]}" != "0 0" ]; then
+  echo " !     Failed to install dependencies with Leiningen"
+  exit 1
+fi
+
+# repack cache with new assets
+rm -rf $CACHE_STORE_DIR
+mkdir -p $(dirname $CACHE_STORE_DIR)
+cp -r $CACHE_TARGET_DIR $CACHE_STORE_DIR
+rm -rf $CACHE_TARGET_DIR

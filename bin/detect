@@ -4,7 +4,11 @@ $:.unshift File.expand_path("../../lib", __FILE__)
 require "language_pack"
 
 if pack = LanguagePack.detect(ARGV.first)
-  puts pack.name
+  if File.exists?("#{ARGV.first}/project.clj")
+    puts pack.name+"Clj"
+  else
+    puts pack.name
+  end
   exit 0
 else
   puts "no"
